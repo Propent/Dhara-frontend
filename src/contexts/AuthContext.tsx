@@ -71,11 +71,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const userData = await response.json();
         setUser(userData);
       } else {
-        localStorage.removeItem("auth_token");
+        localStorage.removeItem("access_token");
         setToken(null);
       }
     } catch {
-      localStorage.removeItem("auth_token");
+      localStorage.removeItem("access_token");
       setToken(null);
     } finally {
       setIsLoading(false);
