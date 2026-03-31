@@ -1,358 +1,144 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
-import { 
-  Plus, Send, User, Loader2, 
-  PanelLeftOpen, PanelLeftClose, Sparkles,
-  Search, History, Trash2, LogOut,
-  MapPin, FileText, ChevronRight, MessageSquare,
-  Settings, Bell, Copy, Share2, Check, Paperclip, 
-  MoreHorizontal, Maximize2, Star, Edit3, X, ThumbsDown,
-  Mic, ThumbsUp, Clock, Upload
-} from 'lucide-react';
-import api from '@/lib/api';
+import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/contexts/AuthContext";
+import api from "@/lib/api";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
+import { 
+  Plus, 
+  MessageSquare, 
+  Search, 
+  PanelLeft, 
+  Settings, 
+  LogOut, 
+  MoreVertical, 
+  Share, 
+  Trash2, 
+  Star,
+  Loader2,
+  ChevronRight,
+  ChevronDown,
+  ChevronUp,
+  Brain,
+  ExternalLink,
+  Shield,
+  Square
+} from "lucide-react";
 
 export default function ChatPage() {
+  const { user, logout, fetchSessions, sessions } = useAuth();
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
+  
   const [messages, setMessages] = useState<any[]>([]);
   const [input, setInput] = useState('');
   const [isThinking, setIsThinking] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [sessions, setSessions] = useState<any[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [likedMessages, setLikedMessages] = useState<Set<string>>(new Set());
-  const [dislikedMessages, setDislikedMessages] = useState<Set<string>>(new Set());
-  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-  const [editContent, setEditContent] = useState('');
   const [expandedThoughts, setExpandedThoughts] = useState<Record<string, boolean>>({});
-  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
-  const [editTitle, setEditTitle] = useState('');
-  const [showStarred, setShowStarred] = useState(false);
-  const [showSourcesPanel, setShowSourcesPanel] = useState(false);
   const [currentSources, setCurrentSources] = useState<any[]>([]);
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingTime, setRecordingTime] = useState(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [showSourcesPanel, setShowSourcesPanel] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState<'recent' | 'starred'>('recent');
+  const [showThoughtProcess, setShowThoughtProcess] = useState(false);
+  const [thoughtSteps, setThoughtSteps] = useState<string[]>([]);
+  const [isGreeting, setIsGreeting] = useState(false);
 
-  const toggleThought = (id: string) => {
-    setExpandedThoughts(prev => ({ ...prev, [id]: !prev[id] }));
-  };
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const formatTime = (timestamp: string) => {
-    if (!timestamp) return '';
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    
-    if (diffDays === 0) {
-      return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-    } else if (diffDays === 1) {
-      return 'Yesterday';
-    } else if (diffDays < 7) {
-      return date.toLocaleDateString('en-US', { weekday: 'short' });
-    } else {
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    }
-  };
-
-  const formatFullDateTime = (timestamp: string) => {
-    if (!timestamp) return '';
-    const date = new Date(timestamp);
-    return date.toLocaleString('en-US', { 
-      weekday: 'short', 
-      month: 'short', 
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric', 
-      minute: '2-digit', 
-      hour12: true 
-    });
-  };
-
-  const startVoiceRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      
-      mediaRecorder.start();
-      setIsRecording(true);
-      
-      mediaRecorder.ondataavailable = (e) => {
-        const audioBlob = new Blob([e.data], { type: 'audio/webm' });
-        // Would upload to backend for transcription
-        console.log('Audio captured:', audioBlob.size);
-      };
-    } catch (err) {
-      console.error('Voice recording error:', err);
-    }
-  };
-
-  const stopVoiceRecording = () => {
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
-    }
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length > 0) {
-      setUploadedFiles(prev => [...prev, ...files]);
-    }
-  };
-
-  const removeUploadedFile = (index: number) => {
-    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const handleFileUploadAndQuery = async (file: File) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('question', input || `Analyze this document: ${file.name}`);
-    
-    try {
-      const res = await api.post('/rag/upload-query', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
-      // Handle response
-    } catch (err) {
-      console.error('File upload error:', err);
-    }
-  };
-
-  const handleLike = (messageId: string) => {
-    setLikedMessages(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(messageId)) {
-        newSet.delete(messageId);
-      } else {
-        newSet.add(messageId);
-        newSet.delete(messageId); // Remove from disliked if exists
-        setDislikedMessages(prev => {
-          const d = new Set(prev);
-          d.delete(messageId);
-          return d;
-        });
-      }
-      return newSet;
-    });
-  };
-
-  const handleDislike = (messageId: string) => {
-    setDislikedMessages(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(messageId)) {
-        newSet.delete(messageId);
-      } else {
-        newSet.add(messageId);
-        newSet.delete(messageId); // Remove from liked if exists
-        setLikedMessages(prev => {
-          const d = new Set(prev);
-          d.delete(messageId);
-          return d;
-        });
-      }
-      return newSet;
-    });
-  };
-
-  const startEditMessage = (messageId: string, content: string) => {
-    setEditingMessageId(messageId);
-    setEditContent(content);
-  };
-
-  const saveEditMessage = () => {
-    if (editingMessageId && editContent.trim()) {
-      setMessages(prev => prev.map(m => 
-        m.id === editingMessageId ? { ...m, content: editContent } : m
-      ));
-      // TODO: Update in backend
-    }
-    setEditingMessageId(null);
-    setEditContent('');
-  };
+  const GREETINGS = ["hi", "hello", "hey", "good morning", "good afternoon", "good evening", "howdy", "hi there", "hello there"];
 
   useEffect(() => {
-    const init = async () => {
-      try {
-        const token = localStorage.getItem('access_token');
-        const uRes = await api.get('/auth/me', { params: { token: token || 'mock' } });
-        setUser(uRes.data);
-        fetchSessions();
-      } catch (err) {
-        // Mock user for bypass
-        setUser({ username: 'Rahul', role: 'admin' });
-        fetchSessions();
-      }
-    };
-    init();
-  }, [router]);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, isThinking]);
 
-  const fetchSessions = async () => {
-    try {
-      const res = await api.get('/sessions');
-      setSessions(res.data);
-    } catch (err) {}
+  // Fetch sessions on mount and when user changes
+  useEffect(() => {
+    console.log('useEffect running, user:', !!user, 'token:', !!localStorage.getItem('access_token'));
+    if (user && localStorage.getItem('access_token')) {
+      fetchSessions();
+    }
+  }, [user, fetchSessions]);
+
+  useEffect(() => {
+    if (sessions.length > 0 && !currentSessionId) {
+      // Don't auto-select if we want to stay on welcome screen
+    }
+  }, [sessions, currentSessionId]);
+
+  const startNewChat = () => {
+    setCurrentSessionId(null);
+    setMessages([]);
+    setCurrentSources([]);
+    inputRef.current?.focus();
   };
 
   const loadSession = async (sessionId: string) => {
-    setCurrentSessionId(sessionId);
-    setIsThinking(true);
     try {
+      setCurrentSessionId(sessionId);
       const res = await api.get(`/sessions/${sessionId}/history`);
-      const msgs = Array.isArray(res.data) ? res.data : (res.data?.messages || []);
-      setMessages(msgs);
+      setMessages(res.data.messages || []);
+      setCurrentSources([]);
     } catch (err) {
-    } finally {
-      setIsThinking(false);
+      console.error('Failed to load session:', err);
     }
   };
 
-  const startNewChat = () => {
-    setMessages([]);
-    setCurrentSessionId(null);
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('access_token');
-    router.push('/auth');
-  };
-
-  const deleteSession = async (e: React.MouseEvent, id: string) => {
+  const deleteSession = async (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
     try {
-      await api.delete(`/sessions/${id}`);
+      await api.delete(`/sessions/${sessionId}`);
+      if (currentSessionId === sessionId) {
+        startNewChat();
+      }
       fetchSessions();
-      if (currentSessionId === id) startNewChat();
-    } catch (err) {}
-  };
-
-  const toggleStar = async (e: React.MouseEvent, id: string, currentStarred: boolean) => {
-    e.stopPropagation();
-    try {
-      await api.put(`/sessions/${id}`, { is_starred: !currentStarred });
-      fetchSessions();
-    } catch (err) {}
-  };
-
-  const startRename = (e: React.MouseEvent, id: string, currentTitle: string) => {
-    e.stopPropagation();
-    setEditingSessionId(id);
-    setEditTitle(currentTitle || '');
-  };
-
-  const saveRename = async (id: string) => {
-    if (!editTitle.trim()) {
-      setEditingSessionId(null);
-      return;
+    } catch (err) {
+      console.error('Failed to delete session:', err);
     }
+  };
+
+  const toggleStar = async (e: React.MouseEvent, sessionId: string, isStarred: boolean) => {
+    e.stopPropagation();
     try {
-      await api.put(`/sessions/${id}`, { title: editTitle.trim() });
+      await api.patch(`/sessions/${sessionId}`, { is_starred: !isStarred });
       fetchSessions();
-    } catch (err) {}
-    setEditingSessionId(null);
-  };
-
-  const stripMarkdown = (text: string): string => {
-    let result = text;
-
-    // Convert markdown tables to readable format
-    const tableRegex = /\|([^\n]+)\|\n\|[-|\s]+\|\n((?:\|[^\n]+\|\n?)+)/g;
-    result = result.replace(tableRegex, (match, headerLine, bodyLines) => {
-      const headers = headerLine.split('|').filter(Boolean).map((h: string) => h.trim());
-      const maxWidths = headers.map((h: string) => h.length);
-      
-      const rows = bodyLines.trim().split('\n').map((row: string) => 
-        row.split('|').filter(Boolean).map((c: string) => c.trim())
-      );
-      
-      rows.forEach((row: string[]) => {
-        row.forEach((cell: string, i: number) => {
-          maxWidths[i] = Math.max(maxWidths[i], cell.length);
-        });
-      });
-      
-      let output = '\n';
-      output += headers.map((h: string, i: number) => h.padEnd(maxWidths[i])).join('  ') + '\n';
-      output += maxWidths.map((w: number) => '-'.repeat(w)).join('  ') + '\n';
-      output += rows.map((row: string[]) => 
-        row.map((cell: string, i: number) => cell.padEnd(maxWidths[i])).join('  ')
-      ).join('\n');
-      
-      return output;
-    });
-    
-    return result
-      .replace(/#{1,6}\s/g, '')           // Headers
-      .replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1') // Bold/Italic
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')  // Links
-      .replace(/\|/g, ' ')                    // Table pipes
-      .replace(/[-=]+\n/g, '\n')               // Table dividers
-      .replace(/\n{3,}/g, '\n\n')            // Multiple newlines
-      .replace(/```[\s\S]*?```/g, '')         // Code blocks
-      .replace(/`([^`]+)`/g, '$1')            // Inline code
-      .trim();
-  };
-
-  const copyToClipboard = (text: string, id: string, shouldStripMarkdown: boolean = true) => {
-    const textToCopy = shouldStripMarkdown ? stripMarkdown(text) : text;
-    navigator.clipboard.writeText(textToCopy);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
-  };
-
-  const resendMessage = (content: string) => {
-    setInput(content);
-  };
-
-  const shareContent = async (text: string) => {
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: 'Dhara PMC', text: text, url: window.location.href });
-      } catch (err) {}
-    } else {
-      copyToClipboard(text, 'share');
+    } catch (err) {
+      console.error('Failed to star session:', err);
     }
   };
 
   const handleSend = async () => {
     if (!input.trim() || isThinking) return;
 
-    const userMsg = { role: 'user', content: input, timestamp: new Date().toISOString() };
+    const trimmedInput = input.trim();
+    const isGreetingMsg = GREETINGS.includes(trimmedInput.toLowerCase());
+    
+    setIsGreeting(isGreetingMsg);
+    setThoughtSteps([]);
+    setShowThoughtProcess(false);
+    
+    const userMsg = { role: 'user', content: trimmedInput, timestamp: new Date().toISOString() };
     setMessages(prev => [...prev, userMsg]);
-    const currentInput = input;
+    const currentInput = trimmedInput;
     setInput('');
     setIsThinking(true);
 
     try {
       let activeId = currentSessionId;
       if (!activeId) {
-        // Create session with initial title from query - send as body
         const res = await api.post('/sessions', { title: currentInput.slice(0, 50), is_incognito: false });
         activeId = res.data.session_id;
         setCurrentSessionId(activeId);
       }
 
       const token = localStorage.getItem('access_token') || 'mock';
+      console.log('Sending request to chat/stream...');
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4200'}/api/chat/stream`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api'}/chat/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -362,6 +148,7 @@ export default function ChatPage() {
       });
 
       if (!response.body) throw new Error('No response body');
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -374,36 +161,57 @@ export default function ChatPage() {
 
       setMessages(prev => [...prev, assistantMsg]);
 
+      let buffer = "";
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || "";
 
         for (const line of lines) {
-          if (!line.trim()) continue;
+          const trimmedLine = line.trim();
+          if (!trimmedLine) continue;
+          
+          // CRITICAL: Robustly extract JSON even if prefix is malformed or missing
+          let jsonStr = trimmedLine;
+          const startIdx = jsonStr.indexOf("{");
+          if (startIdx !== -1) {
+            jsonStr = jsonStr.substring(startIdx);
+          } else {
+            continue;
+          }
+          
+          if (jsonStr === "[DONE]") continue;
+
           try {
-            const data = JSON.parse(line);
-            console.log('Stream data:', data.type, data);
+            const data = JSON.parse(jsonStr);
             
-            if (data.type === 'metadata') {
-              assistantMsg.metadata = { ...assistantMsg.metadata, ...data };
-            } else if (data.type === 'content') {
+            if (data.type === 'content' && data.content) {
+              console.log('Got content:', data.content.slice(0, 50));
+              setIsThinking(false);
               assistantMsg.content += data.content;
-            } else if (data.type === 'final') {
-              assistantMsg.metadata = { ...assistantMsg.metadata, ...data };
-              // Refresh sessions after chat completes to get updated title
-              fetchSessions();
+            } else if (data.type === 'metadata' && data.sources) {
+              console.log('Got metadata, sources:', data.sources.length);
+              assistantMsg.metadata.sources = data.sources;
+              setCurrentSources(data.sources);
             } else if (data.type === 'thought_process') {
-              assistantMsg.metadata.thought_process = data.steps || [];
-              // Auto-expand thinking for user to see
-              setExpandedThoughts(prev => ({ ...prev, [messages.length]: true }));
-            } else if (data.type === 'sources' || data.type === 'metadata') {
-              // Store sources for the panel
-              if (data.sources) {
-                setCurrentSources(data.sources);
+              console.log('Got thought_process:', data.steps);
+              const steps = data.steps || [];
+              setThoughtSteps(steps);
+              assistantMsg.metadata.thought_process = steps;
+            } else if (data.type === 'final') {
+              console.log('Got final');
+              setIsThinking(false);
+              if (!assistantMsg.content || assistantMsg.content.trim() === '') {
+                assistantMsg.content = "I apologize, but I couldn't process your query at the moment. Please try again or rephrase your question about DCPR/UDCPR regulations.";
               }
+              assistantMsg.metadata = { ...assistantMsg.metadata, ...data };
+              fetchSessions();
+            } else if (data.type === 'error') {
+              console.error('Stream error:', data.content);
+              setIsThinking(false);
             }
 
             setMessages(prev => {
@@ -412,18 +220,21 @@ export default function ChatPage() {
               return newMsgs;
             });
           } catch (e) {
-            console.error('Error parsing stream chunk', e);
+            console.warn('Error parsing stream chunk', e, trimmedLine);
           }
         }
       }
     } catch (err) {
       console.error('Chat error:', err);
-      setMessages(prev => [...prev, { role: 'assistant', content: "Unable to connect to the Dhara engine." }]);
+      setIsThinking(false);
+      const fallbackMessage = "I apologize, but I couldn't process your query at the moment. Please try again or rephrase your question about DCPR/UDCPR regulations.";
+      setMessages(prev => [...prev, { role: 'assistant', content: fallbackMessage }]);
     } finally {
       setIsThinking(false);
       fetchSessions();
     }
   };
+
   if (!user) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-[#d97757]" /></div>;
 
   return (
@@ -433,355 +244,346 @@ export default function ChatPage() {
         <div className="p-5 flex items-center justify-between">
           <button onClick={startNewChat} className="flex items-center gap-2 font-semibold text-sm hover:opacity-70 transition-opacity">
             <div className="w-7 h-7 bg-[#d97757] rounded-md flex items-center justify-center text-white">
-              <Sparkles size={14} fill="currentColor" />
+              <Plus className="w-4 h-4" />
             </div>
-            Dhara
+            New Chat
           </button>
-          <button onClick={() => setIsSidebarOpen(false)} className="text-gray-400 hover:text-gray-600"><PanelLeftClose size={18} /></button>
+          <button onClick={() => setIsSidebarOpen(false)} className="p-1.5 hover:bg-[#ebebe6] rounded-md text-[#8e8e8a]">
+            <PanelLeft className="w-4 h-4" />
+          </button>
         </div>
 
-        <button onClick={startNewChat} className="mx-4 mb-4 p-2.5 bg-white border border-[#e5e5e0] rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-gray-50 transition-colors">
-          <Plus size={14} /> New Chat
-        </button>
-
-        {/* Starred Section */}
-        <div className="flex-1 overflow-y-auto px-2">
-          <div 
-            className="px-3 mb-2 mt-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2 cursor-pointer hover:text-[#d97757]"
-            onClick={() => setShowStarred(!showStarred)}
-          >
-            <ChevronRight size={12} className={`transition-transform ${showStarred ? 'rotate-90' : ''}`} />
-            Starred
-          </div>
-          
-          {showStarred && sessions.filter(s => s.is_starred).map(s => (
-            <div key={`starred-${s.id}`} onClick={() => loadSession(s.id)} className={`group px-3 py-2 rounded-lg text-sm cursor-pointer flex items-center justify-between transition-colors ${currentSessionId === s.id ? 'bg-[#ebebe8]' : 'hover:bg-[#ebebe8]/50'}`}>
-              {editingSessionId === s.id ? (
-                <div className="flex-1 flex items-center gap-1">
-                  <input 
-                    type="text" 
-                    value={editTitle} 
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && saveRename(s.id)}
-                    onBlur={() => saveRename(s.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="flex-1 px-1 py-0.5 text-xs border rounded"
-                    autoFocus
-                  />
-                </div>
-              ) : (
-                <>
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                    <Star size={12} className="text-yellow-500 fill-yellow-500 shrink-0" />
-                    <span className="truncate font-medium">{s.title || "New Inquiry"}</span>
-                  </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                    <button onClick={(e) => toggleStar(e, s.id, s.is_starred)} className="text-gray-400 hover:text-yellow-500">
-                      <Star size={12} className="fill-yellow-500 text-yellow-500" />
-                    </button>
-                    <button onClick={(e) => startRename(e, s.id, s.title)} className="text-gray-400 hover:text-blue-500">
-                      <Edit3 size={12} />
-                    </button>
-                    <button onClick={(e) => deleteSession(e, s.id)} className="text-gray-400 hover:text-red-500">
-                      <Trash2 size={12} />
+        <div className="flex-1 overflow-y-auto px-3 py-2 custom-scrollbar">
+          {/* Starred Section */}
+          {sessions.some(s => s.is_starred) && (
+            <div className="mb-4">
+              <div className="px-3 py-2 text-[11px] font-semibold text-[#8e8e8a] uppercase tracking-wider">
+                Starred
+              </div>
+              {sessions.filter(s => s.is_starred).map((session) => (
+                <div 
+                  key={session.session_id} 
+                  onClick={() => loadSession(session.session_id)}
+                  className={`group relative flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer mb-1 transition-colors ${currentSessionId === session.session_id ? 'bg-[#ebebe6] text-[#1a1a1a]' : 'hover:bg-[#f0f0ed] text-[#676764]'}`}
+                >
+                  <MessageSquare className="w-4 h-4 flex-shrink-0 opacity-60" />
+                  <span className="text-[13px] font-medium truncate pr-10">{session.title}</span>
+                  <div className="absolute right-2 opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity">
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        api.patch(`/sessions/${session.session_id}`, { is_starred: false })
+                          .then(() => setTimeout(() => fetchSessions(), 100))
+                          .catch(err => console.error('Star failed:', err));
+                      }} 
+                      className="p-1 hover:text-[#d97757]"
+                    >
+                      <Star className="w-3.5 h-3.5 fill-[#d97757] text-[#d97757]" />
                     </button>
                   </div>
-                </>
-              )}
-            </div>
-          ))}
-
-          {!showStarred && (
-            <>
-              <div className="px-3 mb-2 mt-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Recent</div>
-              {sessions.filter(s => !s.is_starred).map(s => (
-                <div key={s.id} onClick={() => loadSession(s.id)} className={`group px-3 py-2 rounded-lg text-sm cursor-pointer flex items-center justify-between transition-colors ${currentSessionId === s.id ? 'bg-[#ebebe8]' : 'hover:bg-[#ebebe8]/50'}`}>
-                  {editingSessionId === s.id ? (
-                    <div className="flex-1 flex items-center gap-1">
-                      <input 
-                        type="text" 
-                        value={editTitle} 
-                        onChange={(e) => setEditTitle(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && saveRename(s.id)}
-                        onBlur={() => saveRename(s.id)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="flex-1 px-1 py-0.5 text-xs border rounded"
-                        autoFocus
-                      />
-                      <button onClick={(e) => { e.stopPropagation(); setEditingSessionId(null); }} className="text-gray-400 hover:text-gray-600">
-                        <X size={12} />
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <span className="truncate flex-1 font-medium">{s.title || "New Inquiry"}</span>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                        <button onClick={(e) => toggleStar(e, s.id, s.is_starred)} className="text-gray-400 hover:text-yellow-500">
-                          <Star size={12} />
-                        </button>
-                        <button onClick={(e) => startRename(e, s.id, s.title)} className="text-gray-400 hover:text-blue-500">
-                          <Edit3 size={12} />
-                        </button>
-                        <button onClick={(e) => deleteSession(e, s.id)} className="text-gray-400 hover:text-red-500">
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    </>
-                  )}
                 </div>
               ))}
-            </>
+            </div>
+          )}
+
+          {/* Recent Section */}
+          {sessions.some(s => !s.is_starred) && (
+            <div>
+              <div className="px-3 py-2 text-[11px] font-semibold text-[#8e8e8a] uppercase tracking-wider">
+                Recent
+              </div>
+              {sessions.filter(s => !s.is_starred).map((session) => (
+                <div 
+                  key={session.session_id} 
+                  onClick={() => loadSession(session.session_id)}
+                  className={`group relative flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer mb-1 transition-colors ${currentSessionId === session.session_id ? 'bg-[#ebebe6] text-[#1a1a1a]' : 'hover:bg-[#f0f0ed] text-[#676764]'}`}
+                >
+                  <MessageSquare className="w-4 h-4 flex-shrink-0 opacity-60" />
+                  <span className="text-[13px] font-medium truncate pr-10">{session.title}</span>
+                  <div className="absolute right-2 opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity">
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        api.patch(`/sessions/${session.session_id}`, { is_starred: true })
+                          .then(() => setTimeout(() => fetchSessions(), 100))
+                          .catch(err => console.error('Star failed:', err));
+                      }} 
+                      className="p-1 hover:text-[#d97757]"
+                    >
+                      <Star className={`w-3.5 h-3.5 ${session.is_starred ? 'fill-[#d97757] text-[#d97757]' : ''}`} />
+                    </button>
+                    <button onClick={(e) => deleteSession(e, session.session_id)} className="p-1 hover:text-red-500">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
 
-        <div className="p-4 border-t border-[#e5e5e0]">
-          <div className="flex items-center gap-3 px-1">
-            <div className="w-8 h-8 bg-white border border-[#e5e5e0] rounded-full flex items-center justify-center text-[10px] font-bold uppercase">{user.username?.[0]}</div>
-            <span className="text-xs font-bold flex-1 truncate">{user.username}</span>
-            <button onClick={handleLogout} className="text-gray-400 hover:text-red-500"><LogOut size={14} /></button>
+        <div className="p-4 border-t border-[#e5e5e0] bg-[#f5f5f2]">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-8 h-8 rounded-full bg-[#d97757] flex items-center justify-center text-white text-xs font-bold shadow-sm">
+              {user.full_name?.[0] || user.email?.[0].toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-semibold truncate leading-tight">{user.full_name || 'User'}</p>
+              <p className="text-[11px] text-[#8e8e8a] truncate leading-tight">{user.email}</p>
+            </div>
           </div>
+          <button onClick={logout} className="w-full flex items-center gap-2 px-3 py-2 text-[13px] font-medium text-[#676764] hover:bg-[#ebebe6] rounded-lg transition-colors">
+            <LogOut className="w-4 h-4" />
+            Log out
+          </button>
         </div>
       </aside>
 
-      {/* Main Chat Area */}
+      {/* Main Content */}
       <main className="flex-1 flex flex-col relative bg-white">
-        {!isSidebarOpen && (
-          <button onClick={() => setIsSidebarOpen(true)} className="absolute top-4 left-4 z-20 p-2 text-gray-400 hover:text-gray-600 bg-white/50 backdrop-blur rounded-lg">
-            <PanelLeftOpen size={20} />
-          </button>
-        )}
+        <header className={`h-14 flex items-center justify-between px-6 transition-all ${isSidebarOpen ? '' : 'ml-4'}`}>
+          <div className="flex items-center gap-2">
+            {!isSidebarOpen && (
+              <button onClick={() => setIsSidebarOpen(true)} className="p-1.5 hover:bg-[#f5f5f2] rounded-md text-[#8e8e8a]">
+                <PanelLeft className="w-4 h-4" />
+              </button>
+            )}
+            <h1 className="font-semibold text-sm tracking-tight text-[#1a1a1a]">
+              Dhara
+            </h1>
+            {currentSessionId && sessions.find(s => s.session_id === currentSessionId)?.is_incognito && (
+              <span className="flex items-center gap-1 text-[10px] bg-zinc-100 text-zinc-500 px-1.5 py-0.5 rounded font-bold tracking-wider">
+                <Shield className="w-2.5 h-2.5" /> INCOGNITO
+              </span>
+            )}
+          </div>
+          
+          <div className="flex items-center gap-2">
+            {currentSources.length > 0 && (
+              <button 
+                onClick={() => setShowSourcesPanel(!showSourcesPanel)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${showSourcesPanel ? 'bg-[#ebebe6] text-[#343433]' : 'text-[#8e8e8a] hover:text-[#343433]'}`}
+              >
+                Sources <span className="bg-[#d97757] text-white w-4 h-4 flex items-center justify-center rounded-full text-[9px]">{currentSources.length}</span>
+              </button>
+            )}
+          </div>
+        </header>
 
-        <div className="flex-1 overflow-y-auto scroll-smooth">
-          {messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center p-8 max-w-2xl mx-auto text-center">
-              <h1 className="text-3xl font-serif font-medium mb-8">How can Dhara help you?</h1>
-              <div className="grid grid-cols-2 gap-3 w-full">
-                {[
-                  "Plot Feasibility for Kothrud",
-                  "FSI for Residential Zones",
-                  "DCPR 2017 side margins",
-                  "Society Registration process"
-                ].map((q, i) => (
-                  <button key={i} onClick={() => setInput(q)} className="p-4 border border-[#e5e5e0] rounded-xl text-sm font-medium hover:border-[#d97757] hover:bg-[#fffcfb] transition-all text-left">
-                    {q} <ChevronRight size={14} className="inline float-right mt-1 opacity-30" />
-                  </button>
-                ))}
+        <div className="flex-1 overflow-y-auto py-8 custom-scrollbar">
+          <div className="max-w-3xl mx-auto px-6">
+            {messages.length === 0 ? (
+              <div className="h-[60vh] flex flex-col items-center justify-center text-center">
+                <div className="w-16 h-16 bg-[#f5f5f2] rounded-2xl flex items-center justify-center mb-6 shadow-sm border border-[#e5e5e0]">
+                  <Brain className="w-8 h-8 text-[#d97757]" />
+                </div>
+                <h2 className="text-xl font-bold text-[#1a1a1a] mb-2 tracking-tight">How can Dhara help you today?</h2>
+                <p className="text-[#8e8e8a] text-sm max-w-sm leading-relaxed mb-8">
+                  Ask about DCPR 2034, building regulations, FSI lookups, or property feasibility in Pune.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-lg">
+                  {[
+                    "FSI for 1000 sqm plot on 12m road",
+                    "Side margins for 24m high building",
+                    "Parking for residential 2BHK flat",
+                    "Scheme 33(7B) redevelopment rules"
+                  ].map((q, i) => (
+                    <button 
+                      key={i} 
+                      onClick={() => { setInput(q); inputRef.current?.focus(); }}
+                      className="px-4 py-3 bg-white border border-[#e5e5e0] hover:border-[#d97757] hover:bg-[#fcfcfb] rounded-xl text-left text-xs font-medium text-[#676764] transition-all shadow-sm group"
+                    >
+                      <div className="flex items-center justify-between">
+                        {q}
+                        <ChevronRight className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity text-[#d97757]" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          ) : (
-            <div className="max-w-3xl mx-auto w-full px-6 py-12 space-y-12">
-              {(Array.isArray(messages) ? messages : []).map((m, i) => (
-                <div key={i} className={`flex gap-6 group ${m.role === 'user' ? 'justify-end' : ''}`}>
-                  {m.role === 'assistant' && (
-                    <div className="w-8 h-8 rounded-md bg-[#d97757]/10 flex items-center justify-center text-[#d97757] shrink-0 mt-1">
-                      <Sparkles size={16} fill="currentColor" />
+            ) : (
+              <div className="space-y-10 pb-12">
+                {messages.filter(m => m.role !== 'assistant' || m.content).map((msg, idx) => (
+                  <div key={idx} className="flex gap-5 group">
+                    <div className={`w-8 h-8 rounded-lg flex-shrink-0 flex items-center justify-center text-xs font-bold shadow-sm ${msg.role === 'user' ? 'bg-[#ebebe6] text-[#676764]' : 'bg-[#d97757] text-white'}`}>
+                      {msg.role === 'user' ? (user.full_name?.[0] || 'U') : <Brain className="w-4 h-4" />}
                     </div>
-                  )}
-                  <div className={`flex flex-col ${m.role === 'user' ? 'max-w-[75%]' : 'max-w-[85%]'}`}>
-                    
-                    {/* Assistant Thinking Block - Show inline with better styling */}
-                    {(m.role === 'assistant') && (m.metadata?.thought_process?.length > 0) && (
-                      <div className="mb-4 p-3 bg-[#fafafa] rounded-xl border border-gray-100">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Sparkles size={14} className="text-[#d97757]" />
-                          <span className="text-xs font-semibold text-[#d97757]">AI Thinking</span>
-                        </div>
-                        <div className="space-y-1.5">
-                          {(Array.isArray(m.metadata.thought_process) ? m.metadata.thought_process : []).filter((step: any) => {
-                            const stepStr = String(step);
-                            return !stepStr.includes('Found 0') && 
-                                   !stepStr.includes('Vectorstore connection failed') &&
-                                   !stepStr.includes('Expanded to') &&
-                                   !stepStr.includes('search queries');
-                          }).map((step: any, idx: number) => {
-                            const stepStr = String(step);
-                            let icon = '○';
-                            let iconColor = 'text-gray-400';
-                            if (stepStr.includes('Analyzing') || stepStr.includes('Identified intent')) {
-                              icon = '🔍';
-                              iconColor = 'text-[#d97757]';
-                            } else if (stepStr.includes('Searching local') || stepStr.includes('Searching web')) {
-                              icon = '📚';
-                              iconColor = 'text-amber-500';
-                            } else if (stepStr.includes('Found') && !stepStr.includes('Found 0')) {
-                              icon = '✅';
-                              iconColor = 'text-emerald-500';
-                            } else if (stepStr.includes('Synthesizing')) {
-                              icon = '✍️';
-                              iconColor = 'text-blue-500';
-                            }
-                            return (
-                              <div key={idx} className="flex items-start gap-2 text-xs text-gray-600">
-                                <span className={`${iconColor} mt-0.5`}>{icon}</span>
-                                <span className="leading-relaxed">{stepStr}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className={`text-[15px] leading-relaxed ${m.role === 'user' ? 'bg-[#f4f4f2] px-4 py-3 rounded-2xl' : ''}`}>
-                      <div className="prose prose-slate prose-sm max-w-none">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
-                      </div>
-                    </div>
-
-                    {/* Metadata Metadata Block */}
-                    {m.role === 'assistant' && m.metadata && (
-                      <div className="mt-6 space-y-4 animate-fade-in border-t border-gray-50 pt-4">
-                        {/* Confidence Score - Only show if > 0 */}
-                        {m.metadata.confidence !== undefined && m.metadata.confidence > 0 && (
-                          <div className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                            <span>Confidence:</span>
-                            <div className="w-24 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                              <div 
-                                className={`h-full transition-all duration-1000 ${m.metadata.confidence > 0.7 ? 'bg-emerald-500' : m.metadata.confidence > 0.4 ? 'bg-amber-500' : 'bg-rose-500'}`}
-                                style={{ width: `${m.metadata.confidence * 100}%` }}
-                              />
-                            </div>
-                            <span className={m.metadata.confidence > 0.7 ? 'text-emerald-600' : m.metadata.confidence > 0.4 ? 'text-amber-600' : 'text-rose-600'}>
-                              {Math.round(m.metadata.confidence * 100)}%
-                            </span>
-                          </div>
-                        )}
-
-                        {/* Clauses & Tables */}
-                        {(m.metadata.clauses_found?.length > 0 || m.metadata.tables_found?.length > 0) && (
-                          <div className="flex flex-wrap gap-2">
-                            {m.metadata.clauses_found?.map((c: string, idx: number) => (
-                              <span key={idx} className="px-2 py-1 bg-blue-50 text-blue-600 text-[10px] font-bold rounded-md border border-blue-100 uppercase tracking-tight">
-                                {c}
-                              </span>
-                            ))}
-                            {m.metadata.tables_found?.map((t: string, idx: number) => (
-                              <span key={idx} className="px-2 py-1 bg-purple-50 text-purple-600 text-[10px] font-bold rounded-md border border-purple-100 uppercase tracking-tight">
-                                {t}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Suggestions */}
-                        {m.metadata.suggestions?.length > 0 && i === messages.length - 1 && (
-                          <div className="space-y-2">
-                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Suggested follow-ups</p>
-                            <div className="flex flex-wrap gap-2">
-                              {m.metadata.suggestions.map((s: string, idx: number) => (
-                                <button 
-                                  key={idx} 
-                                  onClick={() => setInput(s)}
-                                  className="text-left px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-medium text-gray-600 hover:border-[#d97757] hover:text-[#d97757] hover:bg-[#fffcfb] transition-all"
-                                >
-                                  {s}
-                                </button>
+                    <div className="flex-1 min-w-0 pt-1">
+                      {msg.role === 'assistant' && msg.content && msg.metadata?.thought_process && msg.metadata.thought_process.length > 0 && (
+                        <div className="mb-4">
+                          <button 
+                            onClick={() => setExpandedThoughts(prev => ({ ...prev, [msg.timestamp]: !prev[msg.timestamp] }))}
+                            className="flex items-center gap-1.5 text-[11px] font-bold italic text-[#8e8e8a] hover:text-[#d97757] transition-colors"
+                          >
+                            {expandedThoughts[msg.timestamp] ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                            Show thinking
+                          </button>
+                          {expandedThoughts[msg.timestamp] && (
+                            <div className="mt-2 pl-3 border-l-2 border-[#f0f0ed] space-y-1">
+                              {msg.metadata.thought_process.map((step: string, i: number) => (
+                                <p key={i} className="text-[11px] text-[#8e8e8a] font-medium leading-relaxed">• {step}</p>
                               ))}
                             </div>
-                          </div>
-                        )}
+                          )}
+                        </div>
+                      )}
+
+                      <div className="text-[15px] leading-relaxed text-[#343433] font-medium">
+                        <ReactMarkdown 
+                          remarkPlugins={[remarkGfm]} 
+                          rehypePlugins={[rehypeRaw]}
+                          components={{
+                            table: ({children}) => (
+                              <div className="overflow-x-auto my-4 border border-[#e5e5e0] rounded-lg">
+                                <table className="min-w-full divide-y divide-[#e5e5e0]">
+                                  {children}
+                                </table>
+                              </div>
+                            ),
+                            thead: ({children}) => (
+                              <thead className="bg-[#f5f5f2]">{children}</thead>
+                            ),
+                            th: ({children}) => (
+                              <th className="px-4 py-3 text-left text-xs font-bold text-[#676764] uppercase tracking-wider">{children}</th>
+                            ),
+                            td: ({children}) => (
+                              <td className="px-4 py-3 text-sm text-[#343433]">{children}</td>
+                            ),
+                            tr: ({children}) => (
+                              <tr className="border-b border-[#e5e5e0]">{children}</tr>
+                            ),
+                            h1: ({children}) => <h1 className="text-2xl font-bold text-[#1a1a1a] mt-6 mb-4">{children}</h1>,
+                            h2: ({children}) => <h2 className="text-xl font-bold text-[#1a1a1a] mt-5 mb-3">{children}</h2>,
+                            h3: ({children}) => <h3 className="text-lg font-semibold text-[#1a1a1a] mt-4 mb-2">{children}</h3>,
+                            h4: ({children}) => <h4 className="text-base font-semibold text-[#1a1a1a] mt-3 mb-2">{children}</h4>,
+                            p: ({children}) => <p className="mb-3 last:mb-0">{children}</p>,
+                            ul: ({children}) => <ul className="list-disc pl-5 mb-3 space-y-1">{children}</ul>,
+                            ol: ({children}) => <ol className="list-decimal pl-5 mb-3 space-y-1">{children}</ol>,
+                            li: ({children}) => <li className="text-[15px]">{children}</li>,
+                            strong: ({children}) => <strong className="font-semibold text-[#1a1a1a]">{children}</strong>,
+                            em: ({children}) => <em className="italic">{children}</em>,
+                            blockquote: ({children}) => <blockquote className="border-l-4 border-[#d97757] pl-4 py-2 my-4 bg-[#f5f5f2] rounded-r-lg text-[#676764]">{children}</blockquote>,
+                            code: ({children, className}) => {
+                              const isInline = !className;
+                              if (isInline) return <code className="bg-[#f5f5f2] px-1.5 py-0.5 rounded text-[#d97757] text-sm font-mono">{children}</code>;
+                              return <code className={className}>{children}</code>;
+                            },
+                            pre: ({children}) => <pre className="bg-[#1a1a1a] text-[#f5f5f2] p-4 rounded-lg overflow-x-auto my-4 text-sm font-mono">{children}</pre>,
+                            a: ({href, children}) => <a href={href} className="text-[#d97757] hover:underline">{children}</a>,
+                            hr: () => <hr className="border-[#e5e5e0] my-6" />,
+                          }}
+                        >
+                          {msg.content}
+                        </ReactMarkdown>
                       </div>
-                    )}
-
-                    {m.role === 'assistant' && (
-                      <div className="flex items-center gap-3 mt-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                         <button onClick={() => copyToClipboard(m.content, `c-${i}`)} className="text-gray-400 hover:text-[#d97757] flex items-center gap-1 text-[10px] font-bold uppercase">
-                           {copiedId === `c-${i}` ? <Check size={12} /> : <Copy size={12} />} {copiedId === `c-${i}` ? 'Copied' : 'Copy'}
-                         </button>
-                         <button onClick={() => resendMessage(m.content)} className="text-gray-400 hover:text-[#d97757] flex items-center gap-1 text-[10px] font-bold uppercase"><Share2 size={12} /> Resend</button>
-                         <button className="text-gray-400 hover:text-[#d97757] flex items-center gap-1 text-[10px] font-bold uppercase"><ThumbsDown size={12} /> Dislike</button>
-                         {currentSources.length > 0 && (
-                           <button 
-                            onClick={() => setShowSourcesPanel(!showSourcesPanel)} 
-                            className="text-gray-400 hover:text-[#d97757] flex items-center gap-1 text-[10px] font-bold uppercase"
-                           >
-                             <FileText size={12} /> Sources ({currentSources.length})
-                           </button>
-                         )}
-                       </div>
-                    )}
+                      
+                      {msg.role === 'assistant' && msg.metadata?.sources && msg.metadata.sources.length > 0 && (
+                        <button 
+                          onClick={() => setShowSourcesPanel(true)}
+                          className="mt-4 flex items-center gap-1.5 px-2 py-1 bg-[#f5f5f2] border border-[#e5e5e0] rounded-md text-[10px] font-medium text-[#8e8e8a] hover:border-[#d97757] hover:text-[#343433] transition-all"
+                        >
+                          <ExternalLink className="w-2.5 h-2.5" />
+                          Reference Sources ({msg.metadata.sources.length})
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
-              {isThinking && messages.length === 0 && (
-                <div className="flex gap-6 animate-pulse">
-                  <div className="w-8 h-8 rounded-md bg-[#d97757]/10 flex items-center justify-center text-[#d97757] shrink-0"><Sparkles size={16} /></div>
-                  <div className="text-gray-400 text-sm italic font-serif py-1">Thinking...</div>
-                </div>
-              )}
-              <div ref={scrollRef} className="h-32" />
-            </div>
-          )}
-        </div>
-
-        {/* Floating Input Area - Claude Style */}
-        <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-white via-white to-transparent pointer-events-none">
-          <div className="max-w-3xl mx-auto pointer-events-auto">
-            <div className="relative bg-[#f4f4f2] rounded-2xl border border-[#e5e5e0] focus-within:border-gray-400 transition-all p-2 shadow-sm">
-              <textarea 
-                rows={1}
-                className="w-full bg-transparent resize-none py-3 px-4 focus:outline-none text-[15px] placeholder-gray-500 max-h-48 overflow-y-auto"
-                placeholder="Message Dhara..."
-                value={input}
-                onChange={e => {
-                  setInput(e.target.value);
-                  // Auto-resize
-                  e.target.style.height = 'auto';
-                  e.target.style.height = Math.min(e.target.scrollHeight, 192) + 'px';
-                }}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }}}
-              />
-              <div className="flex items-center justify-between px-2 pb-1">
-                <div className="flex items-center gap-1">
-                  <button className="p-1.5 text-gray-400 hover:bg-gray-200 rounded-md transition-colors"><Paperclip size={16} /></button>
-                  <button className="p-1.5 text-gray-400 hover:bg-gray-200 rounded-md transition-colors"><Maximize2 size={16} /></button>
-                </div>
-                <button 
-                  onClick={handleSend}
-                  disabled={!input.trim() || isThinking}
-                  className={`p-1.5 rounded-lg transition-all ${input.trim() && !isThinking ? 'bg-[#d97757] text-white' : 'bg-gray-300 text-gray-50'}`}
-                >
-                  <Send size={18} />
-                </button>
-              </div>
-            </div>
-            <p className="text-center text-[10px] text-gray-400 mt-3 font-medium">Dhara can provide regulatory guidance but always verify with PMC officers.</p>
-          </div>
-        </div>
-      </main>
-
-      {/* Sources Panel - Right Side */}
-      {showSourcesPanel && (
-        <aside className="w-80 bg-white border-l border-[#e5e5e0] flex flex-col overflow-hidden">
-          <div className="p-4 border-b border-[#e5e5e0] flex items-center justify-between">
-            <h3 className="font-bold text-sm">Sources</h3>
-            <button onClick={() => setShowSourcesPanel(false)} className="text-gray-400 hover:text-gray-600">
-              <X size={18} />
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {currentSources.length > 0 ? (
-              currentSources.map((source: any, idx: number) => (
-                <div key={idx} className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-                  <div className="flex items-center gap-2 mb-2">
-                    <FileText size={14} className="text-[#d97757]" />
-                    <span className="text-xs font-bold text-gray-500 uppercase">Source {idx + 1}</span>
+                ))}
+                
+                {isThinking && (
+                  <div className="flex gap-5">
+                    <div className="w-8 h-8 rounded-lg flex-shrink-0 flex items-center justify-center bg-[#d97757] text-white shadow-sm">
+                      <Brain className="w-4 h-4 animate-pulse" />
+                    </div>
+                    <div className="flex-1 min-w-0 pt-1">
+                      <div className="text-[11px] text-[#8e8e8a] italic">Generating response...</div>
+                      {thoughtSteps.length > 0 && (
+                        <div className="mt-3 pl-3 border-l-2 border-[#f0f0ed] space-y-1">
+                          {thoughtSteps.map((step, i) => (
+                            <p key={i} className="text-[11px] text-[#8e8e8a] font-medium italic">{step}</p>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2 mt-2">
+                        <span className="text-[11px] text-[#8e8e8a] italic">Thinking</span>
+                        <div className="flex gap-1">
+                          <div className="w-1.5 h-1.5 bg-[#d97757] rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                          <div className="w-1.5 h-1.5 bg-[#d97757] rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                          <div className="w-1.5 h-1.5 bg-[#d97757] rounded-full animate-bounce"></div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <p className="text-xs text-gray-600 line-clamp-4">{source.text || source.content || 'No content'}</p>
-                  {source.url && (
-                    <a href={source.url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-[#d97757] hover:underline mt-2 block">
-                      View Source →
-                    </a>
-                  )}
-                </div>
-              ))
-            ) : (
-              <div className="text-center text-gray-400 text-sm py-8">
-                No sources available for this response.
+                )}
+                <div ref={messagesEndRef} />
               </div>
             )}
           </div>
-        </aside>
-      )}
+        </div>
+
+        {/* Input Area - Claude Style Floating */}
+        <div className="p-6">
+          <div className="max-w-3xl mx-auto relative">
+            <div className="relative bg-[#f5f5f2] rounded-2xl border-2 border-[#ebebe6] focus-within:border-[#d97757] transition-all shadow-sm">
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
+                placeholder="How can I help you?"
+                className="w-full bg-transparent p-4 pr-14 min-h-[60px] max-h-48 resize-none text-[15px] focus:outline-none placeholder-[#8e8e8a] font-medium"
+                rows={1}
+              />
+              <div className="absolute right-3 bottom-3">
+                <button 
+                  onClick={handleSend}
+                  disabled={!input.trim() || isThinking}
+                  className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${input.trim() ? 'bg-[#d97757] text-white shadow-md hover:opacity-90' : 'bg-[#ebebe6] text-[#8e8e8a]'}`}
+                >
+                  <ChevronUp className="w-5 h-5 stroke-[2.5px]" />
+                </button>
+              </div>
+            </div>
+            <p className="mt-3 text-[10px] text-center font-bold text-[#8e8e8a] tracking-wider uppercase">
+              Pune UDCPR 2024 &bull; DCPR 2034 &bull; AI Powered
+            </p>
+          </div>
+        </div>
+
+        {/* Sources Sidebar */}
+        {showSourcesPanel && (
+          <div className="absolute right-0 top-0 bottom-0 w-80 bg-white border-l border-[#f0f0ed] shadow-2xl z-20 flex flex-col animate-in slide-in-from-right duration-300">
+            <div className="p-5 border-b border-[#f0f0ed] flex items-center justify-between">
+              <h3 className="font-bold text-xs tracking-tight uppercase">Sources</h3>
+              <button onClick={() => setShowSourcesPanel(false)} className="p-1 hover:bg-[#f5f5f2] rounded-md text-[#8e8e8a]">
+                <Plus className="w-4 h-4 rotate-45" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar">
+              {currentSources.length > 0 ? currentSources.map((source, i) => (
+                <div key={i} className="space-y-2 group">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-[#d97757] uppercase tracking-widest">Doc {i+1}</span>
+                  </div>
+                  <h4 className="text-xs font-bold text-[#1a1a1a] leading-tight group-hover:text-[#d97757] transition-colors">{source.source}</h4>
+                  <p className="text-[12px] text-[#676764] leading-relaxed line-clamp-4 font-medium italic">"{source.text}"</p>
+                  <button 
+                    onClick={() => { navigator.clipboard.writeText(source.text || ''); }}
+                    className="flex items-center gap-1 text-[10px] font-bold text-[#8e8e8a] hover:text-[#343433]"
+                  >
+                    <ExternalLink className="w-2.5 h-2.5" /> COPY TEXT
+                  </button>
+                </div>
+              )) : (
+                <div className="h-full flex flex-col items-center justify-center text-center opacity-40">
+                  <Shield className="w-8 h-8 mb-3" />
+                  <p className="text-xs font-bold uppercase tracking-widest">No Sources Loaded</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </main>
     </div>
   );
 }
