@@ -312,7 +312,7 @@ const logout = () => {
     for (const file of files) {
       const formData = new FormData();
       formData.append('file', file);
-      try { await api.post('/ingest', formData); } catch (err) { }
+      try { await api.post('/documents/upload', formData); } catch (err) { }
     }
     setIsUploading(false);
     await fetchDocuments();
