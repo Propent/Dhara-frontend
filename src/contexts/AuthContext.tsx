@@ -24,10 +24,14 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  console.log("AuthProvider rendering, initial state:", { isLoading: true });
+  
   const [user, setUser] = useState<any>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [sessions, setSessions] = useState<any[]>([]);
+
+  console.log("AuthProvider state:", { user: !!user, token: !!token, isLoading });
 
   const fetchSessions = useCallback(async () => {
     if (!token) return;
