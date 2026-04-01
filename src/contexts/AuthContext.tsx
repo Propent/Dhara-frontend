@@ -63,18 +63,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [token, fetchSessions]);
 
   const fetchUser = async (authToken: string) => {
+    console.log("fetchUser called with token:", authToken ? "yes" : "no");
     try {
       const response = await fetch(`${API_URL}/auth/me`, {
         headers: { Authorization: `Bearer ${authToken}` },
       });
+      console.log("/auth/me response:", response.status);
       if (response.ok) {
         const userData = await response.json();
+        console.log("User data fetched:", userData);
         setUser(userData);
       } else {
+        console.log("Auth failed, clearing token");
         localStorage.removeItem("access_token");
         setToken(null);
       }
-    } catch {
+    } catch (err) {
+      console.error("Fetch user error:", err);
       localStorage.removeItem("access_token");
       setToken(null);
     } finally {
