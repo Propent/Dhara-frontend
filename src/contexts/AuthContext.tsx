@@ -46,11 +46,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [token]);
 
   useEffect(() => {
+    console.log("Initial useEffect running, checking localStorage...");
     const storedToken = localStorage.getItem("access_token");
+    console.log("Stored token found:", !!storedToken);
     if (storedToken) {
       setToken(storedToken);
       fetchUser(storedToken);
     } else {
+      console.log("No token, setting isLoading false");
       setIsLoading(false);
     }
   }, []);
@@ -63,21 +66,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [token, fetchSessions]);
 
   const fetchUser = async (authToken: string) => {
+    console.log("fetchUser called with token:", authToken.substring(0, 20) + "...");
     try {
       const response = await fetch(`${API_URL}/auth/me`, {
         headers: { Authorization: `Bearer ${authToken}` },
       });
+      console.log("/auth/me response status:", response.status);
       if (response.ok) {
         const userData = await response.json();
+        console.log("User data fetched:", userData);
         setUser(userData);
+        console.log("User state set, isLoading will be set to false in finally");
       } else {
+        console.log("Auth failed, clearing token");
         localStorage.removeItem("access_token");
         setToken(null);
       }
-    } catch {
+    } catch (err) {
+      console.error("Fetch user error:", err);
       localStorage.removeItem("access_token");
       setToken(null);
     } finally {
+      console.log("Setting isLoading to false");
       setIsLoading(false);
     }
   };
