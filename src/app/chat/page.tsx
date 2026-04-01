@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 
 export default function ChatPage() {
-  const { user, logout, fetchSessions, sessions } = useAuth();
+  const { user, isLoading, logout, fetchSessions, sessions } = useAuth();
   const router = useRouter();
   
   const [messages, setMessages] = useState<any[]>([]);
@@ -49,6 +49,12 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const GREETINGS = ["hi", "hello", "hey", "good morning", "good afternoon", "good evening", "howdy", "hi there", "hello there"];
+
+  useEffect(() => {
+    if (!isLoading && !user) {
+      router.push('/auth');
+    }
+  }, [isLoading, user, router]);
 
   useEffect(() => {
     if (messagesEndRef.current) {
@@ -235,7 +241,9 @@ export default function ChatPage() {
     }
   };
 
-  if (!user) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-[#d97757]" /></div>;
+  if (isLoading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-[#d97757]" /></div>;
+  
+  if (!user) return null;
 
   return (
     <div className="flex h-screen bg-[#fcfcfb] text-[#343433] font-sans overflow-hidden">

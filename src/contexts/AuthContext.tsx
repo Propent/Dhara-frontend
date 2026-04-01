@@ -24,14 +24,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  console.log("AuthProvider rendering, initial state:", { isLoading: true });
-  
   const [user, setUser] = useState<any>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [sessions, setSessions] = useState<any[]>([]);
-
-  console.log("AuthProvider state:", { user: !!user, token: !!token, isLoading });
 
   const fetchSessions = useCallback(async () => {
     if (!token) return;
@@ -41,7 +37,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       if (response.ok) {
         const data = await response.json();
-        // API returns list directly, not {sessions: [...]}
         setSessions(Array.isArray(data) ? data : (data.sessions || []));
       }
     } catch (error) {
@@ -50,19 +45,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [token]);
 
   useEffect(() => {
-    console.log("Initial useEffect running, checking localStorage...");
     const storedToken = localStorage.getItem("access_token");
-    console.log("Stored token found:", !!storedToken);
     if (storedToken) {
       setToken(storedToken);
       fetchUser(storedToken);
     } else {
-      console.log("No token, setting isLoading false");
       setIsLoading(false);
     }
   }, []);
 
-  // Fetch sessions when token is set
   useEffect(() => {
     if (token) {
       fetchSessions();
@@ -70,28 +61,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [token, fetchSessions]);
 
   const fetchUser = async (authToken: string) => {
-    console.log("fetchUser called with token:", authToken.substring(0, 20) + "...");
     try {
       const response = await fetch(`${API_URL}/auth/me`, {
         headers: { Authorization: `Bearer ${authToken}` },
       });
-      console.log("/auth/me response status:", response.status);
       if (response.ok) {
         const userData = await response.json();
-        console.log("User data fetched:", userData);
         setUser(userData);
-        console.log("User state set, isLoading will be set to false in finally");
       } else {
-        console.log("Auth failed, clearing token");
         localStorage.removeItem("access_token");
         setToken(null);
       }
-    } catch (err) {
-      console.error("Fetch user error:", err);
+    } catch {
       localStorage.removeItem("access_token");
       setToken(null);
     } finally {
-      console.log("Setting isLoading to false");
       setIsLoading(false);
     }
   };
@@ -136,7 +120,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(null);
     setSessions([]);
     localStorage.removeItem("access_token");
-    // Redirect to auth page after logout
     window.location.href = "/auth";
   }, []);
 
@@ -158,8 +141,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const endpoint = provider === "google" ? "/api/auth/google/callback" : "/api/auth/github/callback";
     const response = await fetch(`${API_URL}${endpoint}`, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ code, state }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, state }),
     });
 
     if (!response.ok) {
@@ -169,47 +152,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const data = await response.json();
     setToken(data.access_token);
     setUser(data.user);
-    localStorage.setItem("auth_token", data.access_token);
-  }, []);
+    localStorage.setItem("access_token", data.access_token);
+  }, [API_URL]);
 
   const verifyEmail = useCallback(async (token: string) => {
     const response = await fetch(`${API_URL}/auth/verify?token=${token}`);
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || "Verification failed");
+      throw new Error("Email verification failed");
     }
-  }, []);
+  }, [API_URL]);
 
   const forgotPassword = useCallback(async (email: string) => {
-    const formData = new URLSearchParams();
-    formData.append("email", email);
-    
     const response = await fetch(`${API_URL}/auth/forgot-password`, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: formData,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
     });
 
     if (!response.ok) {
       throw new Error("Failed to send reset email");
     }
-  }, []);
+  }, [API_URL]);
 
   const resetPassword = useCallback(async (token: string, newPassword: string) => {
-    const formData = new URLSearchParams();
-    formData.append("token", token);
-    formData.append("new_password", newPassword);
-
     const response = await fetch(`${API_URL}/auth/reset-password`, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: formData,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, new_password: newPassword }),
     });
 
     if (!response.ok) {
-      throw new Error("Password reset failed");
+      throw new Error("Failed to reset password");
     }
-  }, []);
+  }, [API_URL]);
 
   return (
     <AuthContext.Provider

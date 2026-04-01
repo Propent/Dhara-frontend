@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
 import { Sparkles, Loader2 } from 'lucide-react';
 
@@ -14,6 +15,14 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const router = useRouter();
+  const { login, user } = useAuth();
+
+  // Redirect if already logged in
+  useEffect(() => {
+    if (user) {
+      router.push('/chat');
+    }
+  }, [user, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,9 +32,7 @@ export default function LoginPage() {
     
     try {
       if (isLogin) {
-        const res = await api.post('/auth/login', { email: username, password });
-        localStorage.setItem('access_token', res.data.access_token);
-        localStorage.setItem('username', res.data.user?.username || username);
+        await login(username, password);
         router.push('/chat');
       } else {
         await api.post('/auth/register', { 
@@ -68,77 +75,92 @@ export default function LoginPage() {
         </p>
 
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-100 text-red-600 text-sm rounded-2xl text-center font-medium animate-pulse">
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm font-medium">
             {error}
           </div>
         )}
+
         {message && (
-          <div className="mb-6 p-4 bg-green-50 border border-green-100 text-green-600 text-sm rounded-2xl text-center font-medium">
+          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl text-green-600 text-sm font-medium">
             {message}
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="input-group">
-            <label className="block mb-2 text-xs font-bold text-gray-400 uppercase tracking-widest ml-1">Username</label>
-            <input 
-              type="text" 
-              placeholder="e.g. officer_pune" 
-              className="input"
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div>
+            <input
+              type="text"
               value={username}
-              onChange={e => setUsername(e.target.value)}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Email or Username"
+              className="w-full px-4 py-3.5 bg-[#f5f5f2] border border-[#e5e5e0] rounded-xl text-[#1d1d1b] placeholder-[#9ca3af] font-medium focus:outline-none focus:ring-2 focus:ring-[#d97757]/30 focus:border-[#d97757] transition-all"
               required
             />
           </div>
 
           {!isLogin && (
-            <div className="input-group">
-              <label className="block mb-2 text-xs font-bold text-gray-400 uppercase tracking-widest ml-1">Email</label>
-              <input 
-                type="email" 
-                placeholder="officer@pmc.gov.in" 
-                className="input"
+            <div>
+              <input
+                type="email"
                 value={email}
-                onChange={e => setEmail(e.target.value)}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Email (optional)"
+                className="w-full px-4 py-3.5 bg-[#f5f5f2] border border-[#e5e5e0] rounded-xl text-[#1d1d1b] placeholder-[#9ca3af] font-medium focus:outline-none focus:ring-2 focus:ring-[#d97757]/30 focus:border-[#d97757] transition-all"
               />
             </div>
           )}
 
-          <div className="input-group">
-            <label className="block mb-2 text-xs font-bold text-gray-400 uppercase tracking-widest ml-1">Password</label>
-            <input 
-              type="password" 
-              placeholder="••••••••" 
-              className="input"
+          <div>
+            <input
+              type="password"
               value={password}
-              onChange={e => setPassword(e.target.value)}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+              className="w-full px-4 py-3.5 bg-[#f5f5f2] border border-[#e5e5e0] rounded-xl text-[#1d1d1b] placeholder-[#9ca3af] font-medium focus:outline-none focus:ring-2 focus:ring-[#d97757]/30 focus:border-[#d97757] transition-all"
               required
             />
           </div>
 
-          <button type="submit" className="button !mt-8 shadow-lg shadow-black/10" disabled={loading}>
+          {isLogin && (
+            <div className="flex items-center justify-between text-sm">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" className="w-4 h-4 rounded border-[#d1d5db] text-[#d97757] focus:ring-[#d97757]" />
+                <span className="text-gray-500 font-medium">Remember me</span>
+              </label>
+              <button type="button" className="text-[#d97757] font-semibold hover:underline">
+                Forgot password?
+              </button>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-3.5 bg-[#1d1d1b] text-white font-bold rounded-xl hover:bg-[#2d2d2b] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
             {loading ? (
-              <div className="flex items-center justify-center gap-2">
-                <Loader2 className="animate-spin" size={18} />
-                <span>Verifying...</span>
-              </div>
-            ) : (isLogin ? 'Sign In' : 'Create Account')}
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                {isLogin ? 'Signing in...' : 'Creating account...'}
+              </>
+            ) : (
+              isLogin ? 'Sign In' : 'Create Account'
+            )}
           </button>
         </form>
 
-        <div className="mt-10 text-center">
-          <button 
-            onClick={() => setIsLogin(!isLogin)} 
-            className="text-sm font-bold text-[#d97757] hover:underline underline-offset-4"
-          >
-            {isLogin ? "Don't have an account? Sign Up" : "Already have an account? Sign In"}
-          </button>
+        <div className="mt-8 pt-6 border-t border-[#e5e5e0] text-center">
+          <p className="text-gray-500 font-medium text-sm">
+            {isLogin ? "Don't have an account?" : 'Already have an account?'}
+            <button
+              onClick={() => { setIsLogin(!isLogin); setError(''); setMessage(''); }}
+              className="ml-1 text-[#d97757] font-bold hover:underline"
+            >
+              {isLogin ? 'Sign up' : 'Sign in'}
+            </button>
+          </p>
         </div>
       </div>
-      
-      <p className="mt-8 text-[10px] text-gray-400 font-bold uppercase tracking-widest">
-        Secure Access • Pune Municipal Corporation
-      </p>
     </div>
   );
 }
