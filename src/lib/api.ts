@@ -1,4 +1,6 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+const API_URL = process.env.NEXT_PUBLIC_API_URL 
+  ? `${process.env.NEXT_PUBLIC_API_URL}/api`
+  : "http://localhost:8000/api";
 
 function buildUrl(url: string) {
   return url.startsWith('/') ? `${API_URL}${url}` : `${API_URL}/${url}`;
