@@ -25,7 +25,8 @@ import {
   Brain,
   ExternalLink,
   Shield,
-  Square
+  Square,
+  Send
 } from "lucide-react";
 
 export default function ChatPage() {
@@ -546,9 +547,9 @@ export default function ChatPage() {
                 <button 
                   onClick={handleSend}
                   disabled={!input.trim() || isThinking}
-                  className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${input.trim() ? 'bg-[#d97757] text-white shadow-md hover:opacity-90' : 'bg-[#ebebe6] text-[#8e8e8a]'}`}
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${input.trim() ? 'bg-[#d97757] text-white shadow-md hover:opacity-90' : 'bg-[#ebebe6] text-[#8e8e8a]'}`}
                 >
-                  <ChevronUp className="w-5 h-5 stroke-[2.5px]" />
+                  <Send className="w-5 h-5" />
                 </button>
               </div>
             </div>
