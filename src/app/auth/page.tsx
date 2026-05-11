@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import api from '@/lib/api';
 import { Sparkles, Loader2 } from 'lucide-react';
 
 export default function LoginPage() {
@@ -15,7 +14,7 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const router = useRouter();
-  const { login, user } = useAuth();
+  const { login, register, user } = useAuth();
 
   // Redirect if already logged in
   useEffect(() => {
@@ -35,25 +34,12 @@ export default function LoginPage() {
         await login(username, password);
         router.push('/chat');
       } else {
-        await api.post('/auth/register', { 
-          email: email || `${username}@dhara.local`, 
-          password, 
-          full_name: username 
-        });
+        await register(email || `${username}@dhara.local`, password, username);
         setMessage('Account created! You can now sign in.');
         setIsLogin(true);
       }
-    } catch (err: any) {
-      const detail = err.response?.data?.detail;
-      if (typeof detail === 'string') {
-        setError(detail);
-      } else if (Array.isArray(detail)) {
-        setError(detail[0]?.msg || 'Authentication failed');
-      } else if (typeof detail === 'object') {
-        setError(detail.msg || 'Authentication failed');
-      } else {
-        setError('Authentication failed');
-      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Authentication failed');
     } finally {
       setLoading(false);
     }
@@ -116,10 +102,17 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password"
+              minLength={8}
               className="w-full px-4 py-3.5 bg-[#f5f5f2] border border-[#e5e5e0] rounded-xl text-[#1d1d1b] placeholder-[#9ca3af] font-medium focus:outline-none focus:ring-2 focus:ring-[#d97757]/30 focus:border-[#d97757] transition-all"
               required
             />
           </div>
+
+          {!isLogin && (
+            <p className="text-xs text-gray-500 -mt-2">
+              Password must be at least 8 characters.
+            </p>
+          )}
 
           {isLogin && (
             <div className="flex items-center justify-between text-sm">

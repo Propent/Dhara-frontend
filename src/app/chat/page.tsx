@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import api from "@/lib/api";
+import { buildApiUrl } from "@/lib/api-config";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -50,6 +51,67 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const GREETINGS = ["hi", "hello", "hey", "good morning", "good afternoon", "good evening", "howdy", "hi there", "hello there"];
+  const getMessageSources = (msg: any) => {
+    const normalizeSource = (source: any) => {
+      if (!source || typeof source !== 'object') return null;
+      if (source.kind === 'web') {
+        return {
+          kind: 'web',
+          title: source.title || '',
+          url: source.url || '',
+          provider: source.provider || 'web',
+          text: source.text || source.snippet || '',
+        };
+      }
+      if (source.url || source.title || source.provider || source.snippet) {
+        return {
+          kind: 'web',
+          title: source.title || '',
+          url: source.url || '',
+          provider: source.provider || 'web',
+          text: source.snippet || source.text || '',
+        };
+      }
+      return {
+        kind: 'doc',
+        source: source.source || '',
+        page: source.page || 0,
+        doc_type: source.doc_type || '',
+        text: source.text || '',
+      };
+    };
+
+    const merged = [
+      ...(Array.isArray(msg?.metadata?.sources) ? msg.metadata.sources : []),
+      ...(Array.isArray(msg?.metadata?.web_sources) ? msg.metadata.web_sources : []),
+      ...(Array.isArray(msg?.sources) ? msg.sources : []),
+      ...(Array.isArray(msg?.web_sources) ? msg.web_sources : []),
+    ];
+
+    const normalized = merged.map(normalizeSource).filter(Boolean);
+    const seen = new Set<string>();
+    return normalized.filter((source: any) => {
+      const key = JSON.stringify([
+        source?.kind || "",
+        source?.source || "",
+        source?.title || "",
+        source?.url || "",
+        source?.text || "",
+      ]);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+  const stripSourcesSection = (content: string) =>
+    (content || "")
+      .replace(/\n{2,}\*\*Sources:\*\*[\s\S]*$/i, "")
+      .replace(/\n{2,}Sources:\s*(?:\r?\n)?(?:\[(?:Doc|Web)\s+\d+\][\s\S]*)$/i, "")
+      .trim();
+  const openSourcesPanel = (sources: any[]) => {
+    setCurrentSources(sources || []);
+    setShowSourcesPanel(true);
+  };
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -81,6 +143,7 @@ export default function ChatPage() {
     setCurrentSessionId(null);
     setMessages([]);
     setCurrentSources([]);
+    setShowSourcesPanel(false);
     inputRef.current?.focus();
   };
 
@@ -90,6 +153,7 @@ export default function ChatPage() {
       const res = await api.get(`/sessions/${sessionId}/history`);
       setMessages(res.data.messages || []);
       setCurrentSources([]);
+      setShowSourcesPanel(false);
     } catch (err) {
       console.error('Failed to load session:', err);
     }
@@ -145,7 +209,7 @@ export default function ChatPage() {
       const token = localStorage.getItem('access_token') || 'mock';
       console.log('Sending request to chat/stream...');
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api'}/chat/stream`, {
+      const response = await fetch(buildApiUrl('/chat/stream'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -202,7 +266,7 @@ export default function ChatPage() {
             } else if (data.type === 'metadata' && data.sources) {
               console.log('Got metadata, sources:', data.sources.length);
               assistantMsg.metadata.sources = data.sources;
-              setCurrentSources(data.sources);
+              assistantMsg.metadata.web_sources = data.web_sources || [];
             } else if (data.type === 'thought_process') {
               console.log('Got thought_process:', data.steps);
               const steps = data.steps || [];
@@ -368,10 +432,10 @@ export default function ChatPage() {
           </div>
           
           <div className="flex items-center gap-2">
-            {currentSources.length > 0 && (
+            {showSourcesPanel && currentSources.length > 0 && (
               <button 
-                onClick={() => setShowSourcesPanel(!showSourcesPanel)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${showSourcesPanel ? 'bg-[#ebebe6] text-[#343433]' : 'text-[#8e8e8a] hover:text-[#343433]'}`}
+                onClick={() => setShowSourcesPanel(false)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#8e8e8a] hover:text-[#343433] transition-all"
               >
                 Sources <span className="bg-[#d97757] text-white w-4 h-4 flex items-center justify-center rounded-full text-[9px]">{currentSources.length}</span>
               </button>
@@ -388,7 +452,7 @@ export default function ChatPage() {
                 </div>
                 <h2 className="text-xl font-bold text-[#1a1a1a] mb-2 tracking-tight">How can Dhara help you today?</h2>
                 <p className="text-[#8e8e8a] text-sm max-w-sm leading-relaxed mb-8">
-                  Ask about DCPR 2034, building regulations, FSI lookups, or property feasibility in Pune.
+                  Ask about DCPR 2034, building regulations, FSI lookups, or property feasibility in Mumbai.
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-lg">
                   {[
@@ -412,7 +476,9 @@ export default function ChatPage() {
               </div>
             ) : (
               <div className="space-y-10 pb-12">
-                {messages.filter(m => m.role !== 'assistant' || m.content).map((msg, idx) => (
+                {messages.filter(m => m.role !== 'assistant' || m.content).map((msg, idx) => {
+                  const messageSources = getMessageSources(msg);
+                  return (
                   <div key={idx} className="flex gap-5 group">
                     <div className={`w-8 h-8 rounded-lg flex-shrink-0 flex items-center justify-center text-xs font-bold shadow-sm ${msg.role === 'user' ? 'bg-[#ebebe6] text-[#676764]' : 'bg-[#d97757] text-white'}`}>
                       {msg.role === 'user' ? (user.full_name?.[0] || 'U') : <Brain className="w-4 h-4" />}
@@ -482,22 +548,24 @@ export default function ChatPage() {
                             hr: () => <hr className="border-[#e5e5e0] my-6" />,
                           }}
                         >
-                          {msg.content}
+                          {stripSourcesSection(msg.content || "")}
                         </ReactMarkdown>
                       </div>
                       
-                      {msg.role === 'assistant' && msg.metadata?.sources && msg.metadata.sources.length > 0 && (
-                        <button 
-                          onClick={() => setShowSourcesPanel(true)}
-                          className="mt-4 flex items-center gap-1.5 px-2 py-1 bg-[#f5f5f2] border border-[#e5e5e0] rounded-md text-[10px] font-medium text-[#8e8e8a] hover:border-[#d97757] hover:text-[#343433] transition-all"
-                        >
-                          <ExternalLink className="w-2.5 h-2.5" />
-                          Reference Sources ({msg.metadata.sources.length})
-                        </button>
+                      {msg.role === 'assistant' && messageSources.length > 0 && (
+                        <div className="mt-4">
+                          <button 
+                            onClick={() => openSourcesPanel(messageSources)}
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#f5f5f2] border border-[#e5e5e0] rounded-md text-[10px] font-semibold text-[#8e8e8a] hover:border-[#d97757] hover:text-[#343433] transition-all"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            Sources ({messageSources.length})
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
-                ))}
+                )})}
                 
                 {isThinking && (
                   <div className="flex gap-5">
@@ -554,12 +622,11 @@ export default function ChatPage() {
               </div>
             </div>
             <p className="mt-3 text-[10px] text-center font-bold text-[#8e8e8a] tracking-wider uppercase">
-              Pune UDCPR 2024 &bull; DCPR 2034 &bull; AI Powered
+              DCPR 2034 &bull; AI Powered
             </p>
           </div>
         </div>
 
-        {/* Sources Sidebar */}
         {showSourcesPanel && (
           <div className="absolute right-0 top-0 bottom-0 w-80 bg-white border-l border-[#f0f0ed] shadow-2xl z-20 flex flex-col animate-in slide-in-from-right duration-300">
             <div className="p-5 border-b border-[#f0f0ed] flex items-center justify-between">
@@ -569,15 +636,46 @@ export default function ChatPage() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar">
-              {currentSources.length > 0 ? currentSources.map((source, i) => (
-                <div key={i} className="space-y-2 group">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-[#d97757] uppercase tracking-widest">Doc {i+1}</span>
+              {currentSources.length > 0 ? currentSources.map((source, sourceIdx) => (
+                <div key={sourceIdx} className="space-y-2 group">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-[#d97757] uppercase tracking-widest">
+                      {source.kind === 'web' ? `Web ${sourceIdx + 1}` : `Doc ${sourceIdx + 1}`}
+                    </span>
+                    {source.kind !== 'web' && source.page ? (
+                      <span className="text-[10px] font-medium text-[#8e8e8a]">
+                        p.{source.page}
+                      </span>
+                    ) : null}
                   </div>
-                  <h4 className="text-xs font-bold text-[#1a1a1a] leading-tight group-hover:text-[#d97757] transition-colors">{source.source}</h4>
-                  <p className="text-[12px] text-[#676764] leading-relaxed line-clamp-4 font-medium italic">"{source.text}"</p>
+                  {source.kind === 'web' ? (
+                    <>
+                      {(source.provider || source.title) ? (
+                        <h4 className="text-xs font-bold text-[#1a1a1a] leading-tight group-hover:text-[#d97757] transition-colors">
+                          {[source.provider, source.title].filter(Boolean).join(': ')}
+                        </h4>
+                      ) : null}
+                      {source.url ? (
+                        <a
+                          href={source.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block break-all text-[10px] font-semibold text-[#d97757] hover:underline"
+                        >
+                          {source.url}
+                        </a>
+                      ) : null}
+                    </>
+                  ) : source.source ? (
+                    <h4 className="text-xs font-bold text-[#1a1a1a] leading-tight group-hover:text-[#d97757] transition-colors">
+                      {source.source}
+                    </h4>
+                  ) : null}
+                  <p className="text-[12px] text-[#676764] leading-relaxed line-clamp-6 font-medium italic">
+                    "{(source.text || '').trim()}"
+                  </p>
                   <button 
-                    onClick={() => { navigator.clipboard.writeText(source.text || ''); }}
+                    onClick={() => { navigator.clipboard.writeText((source.text || '').trim()); }}
                     className="flex items-center gap-1 text-[10px] font-bold text-[#8e8e8a] hover:text-[#343433]"
                   >
                     <ExternalLink className="w-2.5 h-2.5" /> COPY TEXT

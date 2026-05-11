@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { buildApiUrl } from "@/lib/api-config";
 
 interface AuthContextType {
   user: any;
@@ -21,7 +22,39 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+function getErrorMessage(error: unknown, fallback: string) {
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+
+  if (Array.isArray(error) && error.length > 0) {
+    const first = error[0];
+    if (typeof first === "string" && first.trim()) {
+      return first;
+    }
+    if (
+      first &&
+      typeof first === "object" &&
+      "msg" in first &&
+      typeof first.msg === "string" &&
+      first.msg.trim()
+    ) {
+      return first.msg;
+    }
+  }
+
+  if (
+    error &&
+    typeof error === "object" &&
+    "msg" in error &&
+    typeof error.msg === "string" &&
+    error.msg.trim()
+  ) {
+    return error.msg;
+  }
+
+  return fallback;
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<any>(null);
@@ -32,7 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchSessions = useCallback(async () => {
     if (!token) return;
     try {
-      const response = await fetch(`${API_URL}/sessions`, {
+      const response = await fetch(buildApiUrl("/sessions"), {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (response.ok) {
@@ -62,7 +95,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchUser = async (authToken: string) => {
     try {
-      const response = await fetch(`${API_URL}/auth/me`, {
+      const response = await fetch(buildApiUrl("/auth/me"), {
         headers: { Authorization: `Bearer ${authToken}` },
       });
       if (response.ok) {
@@ -81,7 +114,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const login = useCallback(async (email: string, password: string) => {
-    const response = await fetch(`${API_URL}/auth/login`, {
+    const response = await fetch(buildApiUrl("/auth/login"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
@@ -89,7 +122,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.detail || "Login failed");
+      throw new Error(getErrorMessage(error.detail, "Login failed"));
     }
 
     const data = await response.json();
@@ -103,7 +136,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const register = useCallback(async (email: string, password: string, full_name: string) => {
-    const response = await fetch(`${API_URL}/auth/register`, {
+    const response = await fetch(buildApiUrl("/auth/register"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password, full_name }),
@@ -111,7 +144,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.detail || "Registration failed");
+      throw new Error(getErrorMessage(error.detail, "Registration failed"));
     }
   }, []);
 
@@ -124,25 +157,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const googleLogin = useCallback(async () => {
-    const response = await fetch(`${API_URL}/auth/google`);
+    const response = await fetch(buildApiUrl("/auth/google"));
     if (!response.ok) throw new Error("Google login not available");
     const data = await response.json();
     window.location.href = data.url;
   }, []);
 
   const githubLogin = useCallback(async () => {
-    const response = await fetch(`${API_URL}/auth/github`);
+    const response = await fetch(buildApiUrl("/auth/github"));
     if (!response.ok) throw new Error("GitHub login not available");
     const data = await response.json();
     window.location.href = data.url;
   }, []);
 
   const handleOAuthCallback = useCallback(async (provider: string, code: string, state: string) => {
-    const endpoint = provider === "google" ? "/api/auth/google/callback" : "/api/auth/github/callback";
-    const response = await fetch(`${API_URL}${endpoint}`, {
+    const endpoint = provider === "google" ? "/auth/google/callback" : "/auth/github/callback";
+    const response = await fetch(buildApiUrl(endpoint), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code, state }),
+      body: new URLSearchParams({ code, state }),
     });
 
     if (!response.ok) {
@@ -153,38 +185,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(data.access_token);
     setUser(data.user);
     localStorage.setItem("access_token", data.access_token);
-  }, [API_URL]);
+  }, []);
 
   const verifyEmail = useCallback(async (token: string) => {
-    const response = await fetch(`${API_URL}/auth/verify?token=${token}`);
+    const response = await fetch(buildApiUrl(`/auth/verify?token=${encodeURIComponent(token)}`));
     if (!response.ok) {
       throw new Error("Email verification failed");
     }
-  }, [API_URL]);
+  }, []);
 
   const forgotPassword = useCallback(async (email: string) => {
-    const response = await fetch(`${API_URL}/auth/forgot-password`, {
+    const response = await fetch(buildApiUrl("/auth/forgot-password"), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
+      body: new URLSearchParams({ email }),
     });
 
     if (!response.ok) {
       throw new Error("Failed to send reset email");
     }
-  }, [API_URL]);
+  }, []);
 
   const resetPassword = useCallback(async (token: string, newPassword: string) => {
-    const response = await fetch(`${API_URL}/auth/reset-password`, {
+    const response = await fetch(buildApiUrl("/auth/reset-password"), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, new_password: newPassword }),
+      body: new URLSearchParams({ token, new_password: newPassword }),
     });
 
     if (!response.ok) {
       throw new Error("Failed to reset password");
     }
-  }, [API_URL]);
+  }, []);
 
   return (
     <AuthContext.Provider

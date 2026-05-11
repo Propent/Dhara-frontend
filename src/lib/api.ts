@@ -1,57 +1,114 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL 
-  ? `${process.env.NEXT_PUBLIC_API_URL}/api`
-  : "http://localhost:8000/api";
+import { buildApiUrl } from "@/lib/api-config";
 
-function buildUrl(url: string) {
-  return url.startsWith('/') ? `${API_URL}${url}` : `${API_URL}/${url}`;
+type ErrorPayload = {
+  detail?: unknown;
+  message?: string;
+};
+
+type RequestHeaders = Record<string, string>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ApiResponse = { data: any };
+
+class ApiError extends Error {
+  status: number;
+  detail: unknown;
+
+  constructor(message: string, status: number, detail: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+  }
 }
 
-export default {
-  async get(url: string, headers: any = {}) {
+async function parseResponse(response: Response): Promise<ApiResponse> {
+  const rawText = await response.text();
+  let parsedBody: ErrorPayload | null = null;
+
+  if (rawText) {
+    try {
+      parsedBody = JSON.parse(rawText) as ErrorPayload;
+    } catch {
+      parsedBody = { message: rawText };
+    }
+  }
+
+  if (!response.ok) {
+    const detail = parsedBody?.detail ?? parsedBody?.message ?? rawText;
+    const message =
+      typeof detail === "string" && detail.trim()
+        ? detail
+        : `Request failed with status ${response.status}`;
+    throw new ApiError(message, response.status, detail);
+  }
+
+  return { data: parsedBody };
+}
+
+function buildHeaders(headers: RequestHeaders, token: string | null, body?: unknown) {
+  const finalHeaders: RequestHeaders = {
+    ...headers,
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+
+  if (!(body instanceof FormData) && !finalHeaders["Content-Type"]) {
+    finalHeaders["Content-Type"] = "application/json";
+  }
+
+  return finalHeaders;
+}
+
+function buildBody(body: unknown) {
+  if (body === undefined) {
+    return undefined;
+  }
+
+  return body instanceof FormData ? body : JSON.stringify(body);
+}
+
+const api = {
+  async get(url: string, headers: RequestHeaders = {}): Promise<ApiResponse> {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-    const response = await fetch(buildUrl(url), {
-      headers: { ...headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    const response = await fetch(buildApiUrl(url), {
+      headers: buildHeaders(headers, token),
     });
-    if (!response.ok) throw new Error(await response.text());
-    return { data: await response.json() };
+    return parseResponse(response);
   },
-  async post(url: string, body: any, headers: any = {}) {
+  async post(url: string, body: unknown, headers: RequestHeaders = {}): Promise<ApiResponse> {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-    const response = await fetch(buildUrl(url), {
+    const response = await fetch(buildApiUrl(url), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify(body),
+      headers: buildHeaders(headers, token, body),
+      body: buildBody(body),
     });
-    if (!response.ok) throw new Error(await response.text());
-    return { data: await response.json() };
+    return parseResponse(response);
   },
-  async put(url: string, body: any, headers: any = {}) {
+  async put(url: string, body: unknown, headers: RequestHeaders = {}): Promise<ApiResponse> {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-    const response = await fetch(buildUrl(url), {
+    const response = await fetch(buildApiUrl(url), {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify(body),
+      headers: buildHeaders(headers, token, body),
+      body: buildBody(body),
     });
-    if (!response.ok) throw new Error(await response.text());
-    return { data: await response.json() };
+    return parseResponse(response);
   },
-  async patch(url: string, body: any, headers: any = {}) {
+  async patch(url: string, body: unknown, headers: RequestHeaders = {}): Promise<ApiResponse> {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-    const response = await fetch(buildUrl(url), {
+    const response = await fetch(buildApiUrl(url), {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', ...headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify(body),
+      headers: buildHeaders(headers, token, body),
+      body: buildBody(body),
     });
-    if (!response.ok) throw new Error(await response.text());
-    return { data: await response.json() };
+    return parseResponse(response);
   },
-  async delete(url: string, headers: any = {}) {
+  async delete(url: string, headers: RequestHeaders = {}): Promise<ApiResponse> {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-    const response = await fetch(buildUrl(url), {
+    const response = await fetch(buildApiUrl(url), {
       method: 'DELETE',
-      headers: { ...headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      headers: buildHeaders(headers, token),
     });
-    if (!response.ok) throw new Error(await response.text());
-    return { data: await response.json() };
+    return parseResponse(response);
   },
 };
+
+export default api;
