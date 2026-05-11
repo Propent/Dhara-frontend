@@ -5,7 +5,8 @@ function stripTrailingSlashes(value: string) {
 }
 
 export function getApiBaseUrl() {
-  const configuredUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
+  // const configuredUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
+  const configuredUrl = "https://dhara-rag-2.onrender.com" ;
   const normalizedBase = configuredUrl
     ? stripTrailingSlashes(configuredUrl)
     : DEFAULT_API_ORIGIN;
